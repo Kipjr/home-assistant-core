@@ -34,6 +34,7 @@ from homeassistant.const import (
     LIGHT_LUX,
     PERCENTAGE,
     REVOLUTIONS_PER_MINUTE,
+    EntityCategory,
     UnitOfPower,
     UnitOfPressure,
     UnitOfTemperature,
@@ -41,7 +42,7 @@ from homeassistant.const import (
     UnitOfVolume,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -64,6 +65,7 @@ from .const import (
     MODEL_AIRPURIFIER_4_LITE_RMA1,
     MODEL_AIRPURIFIER_4_LITE_RMB1,
     MODEL_AIRPURIFIER_4_PRO,
+    MODEL_AIRPURIFIER_MA2,
     MODEL_AIRPURIFIER_PRO,
     MODEL_AIRPURIFIER_PRO_V7,
     MODEL_AIRPURIFIER_V2,
@@ -467,6 +469,16 @@ PURIFIER_ZA1_SENSORS = (
     ATTR_HUMIDITY,
     ATTR_TEMPERATURE,
 )
+PURIFIER_MA2_SENSORS = (
+    ATTR_FILTER_LIFE_REMAINING,
+    ATTR_FILTER_USE,
+    ATTR_HUMIDITY,
+    ATTR_MOTOR_SPEED,
+    ATTR_PM25,
+    ATTR_TEMPERATURE,
+    ATTR_USE_TIME,
+    ATTR_ILLUMINANCE,
+)
 PURIFIER_V2_SENSORS = (
     ATTR_FILTER_LIFE_REMAINING,
     ATTR_FILTER_USE,
@@ -564,6 +576,7 @@ MODEL_TO_SENSORS_MAP: dict[str, tuple[str, ...]] = {
     MODEL_AIRPURIFIER_V2: PURIFIER_V2_SENSORS,
     MODEL_AIRPURIFIER_V3: PURIFIER_V3_SENSORS,
     MODEL_AIRPURIFIER_ZA1: PURIFIER_ZA1_SENSORS,
+    MODEL_AIRPURIFIER_MA2: PURIFIER_MA2_SENSORS,
     MODEL_FAN_V2: FAN_V2_V3_SENSORS,
     MODEL_FAN_V3: FAN_V2_V3_SENSORS,
     MODEL_FAN_ZA5: FAN_ZA5_SENSORS,
@@ -985,7 +998,9 @@ class XiaomiGatewayIlluminanceSensor(SensorEntity):
         """Initialize the entity."""
         self._attr_name = f"{gateway_name} {description.name}"
         self._attr_unique_id = f"{gateway_device_id}-{description.key}"
-        self._attr_device_info = {"identifiers": {(DOMAIN, gateway_device_id)}}
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, gateway_device_id)},
+        )
         self._gateway = gateway_device
         self.entity_description = description
         self._available = False

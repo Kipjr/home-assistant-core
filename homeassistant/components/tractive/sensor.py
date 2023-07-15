@@ -10,10 +10,14 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_BATTERY_LEVEL, PERCENTAGE, UnitOfTime
+from homeassistant.const import (
+    ATTR_BATTERY_LEVEL,
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import Trackables
@@ -47,8 +51,6 @@ class TractiveSensorEntityDescription(
 
 class TractiveSensor(TractiveEntity, SensorEntity):
     """Tractive sensor."""
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -134,7 +136,7 @@ class TractiveActivitySensor(TractiveSensor):
 SENSOR_TYPES: tuple[TractiveSensorEntityDescription, ...] = (
     TractiveSensorEntityDescription(
         key=ATTR_BATTERY_LEVEL,
-        name="Tracker battery level",
+        translation_key="tracker_battery_level",
         native_unit_of_measurement=PERCENTAGE,
         device_class=SensorDeviceClass.BATTERY,
         entity_class=TractiveHardwareSensor,
@@ -144,20 +146,19 @@ SENSOR_TYPES: tuple[TractiveSensorEntityDescription, ...] = (
         # Currently, only state operational and not_reporting are used
         # More states are available by polling the data
         key=ATTR_TRACKER_STATE,
-        name="Tracker state",
         translation_key="tracker_state",
         entity_class=TractiveHardwareSensor,
     ),
     TractiveSensorEntityDescription(
         key=ATTR_MINUTES_ACTIVE,
-        name="Minutes active",
+        translation_key="minutes_active",
         icon="mdi:clock-time-eight-outline",
         native_unit_of_measurement=UnitOfTime.MINUTES,
         entity_class=TractiveActivitySensor,
     ),
     TractiveSensorEntityDescription(
         key=ATTR_DAILY_GOAL,
-        name="Daily goal",
+        translation_key="daily_goal",
         icon="mdi:flag-checkered",
         native_unit_of_measurement=UnitOfTime.MINUTES,
         entity_class=TractiveActivitySensor,

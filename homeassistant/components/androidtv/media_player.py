@@ -1,22 +1,15 @@
-"""Support for functionality to interact with Android TV / Fire TV devices."""
+"""Support for functionality to interact with Android / Fire TV devices."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Coroutine
 from datetime import datetime
 import functools
 import logging
-from typing import Any, TypeVar
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
-from adb_shell.exceptions import (
-    AdbTimeoutError,
-    InvalidChecksumError,
-    InvalidCommandError,
-    InvalidResponseError,
-    TcpTimeoutException,
-)
 from androidtv.constants import APPS, KEYS
 from androidtv.exceptions import LockNotAcquiredException
-from typing_extensions import Concatenate, ParamSpec
+from androidtv.setup_async import AndroidTVAsync, FireTVAsync
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
@@ -43,7 +36,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import get_androidtv_mac
+from . import ADB_PYTHON_EXCEPTIONS, ADB_TCP_EXCEPTIONS, get_androidtv_mac
 from .const import (
     ANDROID_DEV,
     ANDROID_DEV_OPT,
@@ -95,14 +88,16 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the Android TV entity."""
-    aftv = hass.data[DOMAIN][entry.entry_id][ANDROID_DEV]
+    """Set up the Android Debug Bridge entity."""
+    aftv: AndroidTVAsync | FireTVAsync = hass.data[DOMAIN][entry.entry_id][ANDROID_DEV]
     device_class = aftv.DEVICE_CLASS
     device_type = (
         PREFIX_ANDROIDTV if device_class == DEVICE_ANDROIDTV else PREFIX_FIRETV
     )
     # CONF_NAME may be present in entry.data for configuration imported from YAML
-    device_name = entry.data.get(CONF_NAME) or f"{device_type} {entry.data[CONF_HOST]}"
+    device_name: str = entry.data.get(
+        CONF_NAME, f"{device_type} {entry.data[CONF_HOST]}"
+    )
 
     device_args = [
         aftv,
@@ -148,12 +143,13 @@ async def async_setup_entry(
     )
 
 
+_FuncType = Callable[Concatenate[_ADBDeviceT, _P], Awaitable[_R]]
+_ReturnFuncType = Callable[Concatenate[_ADBDeviceT, _P], Coroutine[Any, Any, _R | None]]
+
+
 def adb_decorator(
     override_available: bool = False,
-) -> Callable[
-    [Callable[Concatenate[_ADBDeviceT, _P], Awaitable[_R]]],
-    Callable[Concatenate[_ADBDeviceT, _P], Coroutine[Any, Any, _R | None]],
-]:
+) -> Callable[[_FuncType[_ADBDeviceT, _P, _R]], _ReturnFuncType[_ADBDeviceT, _P, _R]]:
     """Wrap ADB methods and catch exceptions.
 
     Allows for overriding the available status of the ADB connection via the
@@ -161,8 +157,8 @@ def adb_decorator(
     """
 
     def _adb_decorator(
-        func: Callable[Concatenate[_ADBDeviceT, _P], Awaitable[_R]]
-    ) -> Callable[Concatenate[_ADBDeviceT, _P], Coroutine[Any, Any, _R | None]]:
+        func: _FuncType[_ADBDeviceT, _P, _R]
+    ) -> _ReturnFuncType[_ADBDeviceT, _P, _R]:
         """Wrap the provided ADB method and catch exceptions."""
 
         @functools.wraps(func)
@@ -170,7 +166,6 @@ def adb_decorator(
             self: _ADBDeviceT, *args: _P.args, **kwargs: _P.kwargs
         ) -> _R | None:
             """Call an ADB-related method and catch exceptions."""
-            # pylint: disable=protected-access
             if not self.available and not override_available:
                 return None
 
@@ -179,8 +174,11 @@ def adb_decorator(
             except LockNotAcquiredException:
                 # If the ADB lock could not be acquired, skip this command
                 _LOGGER.info(
-                    "ADB command not executed because the connection is currently"
-                    " in use"
+                    (
+                        "ADB command %s not executed because the connection is"
+                        " currently in use"
+                    ),
+                    func.__name__,
                 )
                 return None
             except self.exceptions as err:
@@ -192,12 +190,14 @@ def adb_decorator(
                     err,
                 )
                 await self.aftv.adb_close()
+                # pylint: disable-next=protected-access
                 self._attr_available = False
                 return None
             except Exception:
                 # An unforeseen exception occurred. Close the ADB connection so that
                 # it doesn't happen over and over again, then raise the exception.
                 await self.aftv.adb_close()
+                # pylint: disable-next=protected-access
                 self._attr_available = False
                 raise
 
@@ -207,20 +207,20 @@ def adb_decorator(
 
 
 class ADBDevice(MediaPlayerEntity):
-    """Representation of an Android TV or Fire TV device."""
+    """Representation of an Android or Fire TV device."""
 
     _attr_device_class = MediaPlayerDeviceClass.TV
 
     def __init__(
         self,
-        aftv,
-        name,
-        dev_type,
-        unique_id,
-        entry_id,
-        entry_data,
-    ):
-        """Initialize the Android TV / Fire TV device."""
+        aftv: AndroidTVAsync | FireTVAsync,
+        name: str,
+        dev_type: str,
+        unique_id: str,
+        entry_id: str,
+        entry_data: dict[str, Any],
+    ) -> None:
+        """Initialize the Android / Fire TV device."""
         self.aftv = aftv
         self._attr_name = name
         self._attr_unique_id = unique_id
@@ -241,30 +241,21 @@ class ADBDevice(MediaPlayerEntity):
         if mac := get_androidtv_mac(info):
             self._attr_device_info[ATTR_CONNECTIONS] = {(CONNECTION_NETWORK_MAC, mac)}
 
-        self._app_id_to_name = {}
-        self._app_name_to_id = {}
+        self._app_id_to_name: dict[str, str] = {}
+        self._app_name_to_id: dict[str, str] = {}
         self._get_sources = DEFAULT_GET_SOURCES
         self._exclude_unnamed_apps = DEFAULT_EXCLUDE_UNNAMED_APPS
         self._screencap = DEFAULT_SCREENCAP
-        self.turn_on_command = None
-        self.turn_off_command = None
+        self.turn_on_command: str | None = None
+        self.turn_off_command: str | None = None
 
         # ADB exceptions to catch
         if not aftv.adb_server_ip:
             # Using "adb_shell" (Python ADB implementation)
-            self.exceptions = (
-                AdbTimeoutError,
-                BrokenPipeError,
-                ConnectionResetError,
-                ValueError,
-                InvalidChecksumError,
-                InvalidCommandError,
-                InvalidResponseError,
-                TcpTimeoutException,
-            )
+            self.exceptions = ADB_PYTHON_EXCEPTIONS
         else:
             # Using "pure-python-adb" (communicate with ADB server)
-            self.exceptions = (ConnectionResetError, RuntimeError)
+            self.exceptions = ADB_TCP_EXCEPTIONS
 
         # Property attributes
         self._attr_extra_state_attributes = {
@@ -275,7 +266,7 @@ class ADBDevice(MediaPlayerEntity):
         # The number of consecutive failed connect attempts
         self._failed_connect_count = 0
 
-    def _process_config(self):
+    def _process_config(self) -> None:
         """Load the config options."""
         _LOGGER.debug("Loading configuration options")
         options = self._entry_data[ANDROID_DEV_OPT]
@@ -311,7 +302,6 @@ class ADBDevice(MediaPlayerEntity):
                 self._process_config,
             )
         )
-        return
 
     @property
     def media_image_hash(self) -> str | None:
@@ -319,7 +309,7 @@ class ADBDevice(MediaPlayerEntity):
         return f"{datetime.now().timestamp()}" if self._screencap else None
 
     @adb_decorator()
-    async def _adb_screencap(self):
+    async def _adb_screencap(self) -> bytes | None:
         """Take a screen capture from the device."""
         return await self.aftv.adb_screencap()
 
@@ -398,8 +388,8 @@ class ADBDevice(MediaPlayerEntity):
                 await self.aftv.stop_app(self._app_name_to_id.get(source_, source_))
 
     @adb_decorator()
-    async def adb_command(self, command):
-        """Send an ADB command to an Android TV / Fire TV device."""
+    async def adb_command(self, command: str) -> None:
+        """Send an ADB command to an Android / Fire TV device."""
         if key := KEYS.get(command):
             await self.aftv.adb_shell(f"input keyevent {key}")
             return
@@ -423,7 +413,7 @@ class ADBDevice(MediaPlayerEntity):
         return
 
     @adb_decorator()
-    async def learn_sendevent(self):
+    async def learn_sendevent(self) -> None:
         """Translate a key press on a remote to ADB 'sendevent' commands."""
         output = await self.aftv.learn_sendevent()
         if output:
@@ -437,13 +427,13 @@ class ADBDevice(MediaPlayerEntity):
             persistent_notification.async_create(
                 self.hass,
                 msg,
-                title="Android TV",
+                title="Android Debug Bridge",
             )
             _LOGGER.info("%s", msg)
 
     @adb_decorator()
-    async def service_download(self, device_path, local_path):
-        """Download a file from your Android TV / Fire TV device to your Home Assistant instance."""
+    async def service_download(self, device_path: str, local_path: str) -> None:
+        """Download a file from your Android / Fire TV device to your Home Assistant instance."""
         if not self.hass.config.is_allowed_path(local_path):
             _LOGGER.warning("'%s' is not secure to load data from!", local_path)
             return
@@ -451,8 +441,8 @@ class ADBDevice(MediaPlayerEntity):
         await self.aftv.adb_pull(local_path, device_path)
 
     @adb_decorator()
-    async def service_upload(self, device_path, local_path):
-        """Upload a file from your Home Assistant instance to an Android TV / Fire TV device."""
+    async def service_upload(self, device_path: str, local_path: str) -> None:
+        """Upload a file from your Home Assistant instance to an Android / Fire TV device."""
         if not self.hass.config.is_allowed_path(local_path):
             _LOGGER.warning("'%s' is not secure to load data from!", local_path)
             return
@@ -461,7 +451,7 @@ class ADBDevice(MediaPlayerEntity):
 
 
 class AndroidTVDevice(ADBDevice):
-    """Representation of an Android TV device."""
+    """Representation of an Android device."""
 
     _attr_supported_features = (
         MediaPlayerEntityFeature.PAUSE
@@ -476,6 +466,7 @@ class AndroidTVDevice(ADBDevice):
         | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_STEP
     )
+    aftv: AndroidTVAsync
 
     @adb_decorator(override_available=True)
     async def async_update(self) -> None:
@@ -508,7 +499,7 @@ class AndroidTVDevice(ADBDevice):
         if self._attr_state is None:
             self._attr_available = False
 
-        if running_apps:
+        if running_apps and self._attr_app_id:
             self._attr_source = self._attr_app_name = self._app_id_to_name.get(
                 self._attr_app_id, self._attr_app_id
             )
@@ -565,6 +556,7 @@ class FireTVDevice(ADBDevice):
         | MediaPlayerEntityFeature.SELECT_SOURCE
         | MediaPlayerEntityFeature.STOP
     )
+    aftv: FireTVAsync
 
     @adb_decorator(override_available=True)
     async def async_update(self) -> None:
@@ -594,7 +586,7 @@ class FireTVDevice(ADBDevice):
         if self._attr_state is None:
             self._attr_available = False
 
-        if running_apps:
+        if running_apps and self._attr_app_id:
             self._attr_source = self._app_id_to_name.get(
                 self._attr_app_id, self._attr_app_id
             )

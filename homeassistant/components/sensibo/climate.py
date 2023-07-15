@@ -163,6 +163,8 @@ async def async_setup_entry(
 class SensiboClimate(SensiboDeviceBaseEntity, ClimateEntity):
     """Representation of a Sensibo device."""
 
+    _attr_name = None
+
     def __init__(
         self, coordinator: SensiboDataUpdateCoordinator, device_id: str
     ) -> None:
@@ -308,11 +310,13 @@ class SensiboClimate(SensiboDeviceBaseEntity, ClimateEntity):
         if "fanLevel" not in self.device_data.active_features:
             raise HomeAssistantError("Current mode doesn't support setting Fanlevel")
 
+        transformation = self.device_data.fan_modes_translated
         await self.async_send_api_call(
             key=AC_STATE_TO_DATA["fanLevel"],
             value=fan_mode,
             name="fanLevel",
             assumed_state=False,
+            transformation=transformation,
         )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
@@ -347,11 +351,13 @@ class SensiboClimate(SensiboDeviceBaseEntity, ClimateEntity):
         if "swing" not in self.device_data.active_features:
             raise HomeAssistantError("Current mode doesn't support setting Swing")
 
+        transformation = self.device_data.swing_modes_translated
         await self.async_send_api_call(
             key=AC_STATE_TO_DATA["swing"],
             value=swing_mode,
             name="swing",
             assumed_state=False,
+            transformation=transformation,
         )
 
     async def async_turn_on(self) -> None:
@@ -502,8 +508,11 @@ class SensiboClimate(SensiboDeviceBaseEntity, ClimateEntity):
         value: Any,
         name: str,
         assumed_state: bool = False,
+        transformation: dict | None = None,
     ) -> bool:
         """Make service call to api."""
+        if transformation:
+            value = transformation[value]
         result = await self._client.async_set_ac_state_property(
             self._device_id,
             name,
