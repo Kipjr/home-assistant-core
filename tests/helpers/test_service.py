@@ -11,7 +11,7 @@ import voluptuous as vol
 # To prevent circular import when running just this file
 from homeassistant import exceptions
 from homeassistant.auth.permissions import PolicyPermissions
-import homeassistant.components  # noqa: F401, pylint: disable=unused-import
+import homeassistant.components  # noqa: F401
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ENTITY_MATCH_ALL,
@@ -573,6 +573,7 @@ async def test_async_get_all_descriptions(hass: HomeAssistant) -> None:
             f"{translation_key_prefix}.description": "Translated description",
             f"{translation_key_prefix}.fields.level.name": "Field name",
             f"{translation_key_prefix}.fields.level.description": "Field description",
+            f"{translation_key_prefix}.fields.level.example": "Field example",
         }
 
     with patch(
@@ -598,6 +599,10 @@ async def test_async_get_all_descriptions(hass: HomeAssistant) -> None:
             "description"
         ]
         == "Field description"
+    )
+    assert (
+        descriptions[logger.DOMAIN]["set_default_level"]["fields"]["level"]["example"]
+        == "Field example"
     )
 
     hass.services.async_register(logger.DOMAIN, "new_service", lambda x: None, None)
@@ -759,6 +764,7 @@ async def test_async_get_all_descriptions_dynamically_created_services(
         "description": "",
         "fields": {},
         "name": "",
+        "response": {"optional": True},
     }
 
 

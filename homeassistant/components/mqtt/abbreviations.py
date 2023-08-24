@@ -60,6 +60,7 @@ ABBREVIATIONS = {
     "ent_pic": "entity_picture",
     "err_t": "error_topic",
     "err_tpl": "error_template",
+    "evt_typ": "event_types",
     "fanspd_t": "fan_speed_topic",
     "fanspd_tpl": "fan_speed_template",
     "fanspd_lst": "fan_speed_list",
@@ -110,6 +111,7 @@ ABBREVIATIONS = {
     "mode_stat_tpl": "mode_state_template",
     "modes": "modes",
     "name": "name",
+    "o": "origin",
     "obj_id": "object_id",
     "off_dly": "off_delay",
     "on_cmd_type": "on_command_type",
@@ -273,4 +275,10 @@ DEVICE_ABBREVIATIONS = {
     "hw": "hw_version",
     "sw": "sw_version",
     "sa": "suggested_area",
+}
+
+ORIGIN_ABBREVIATIONS = {
+    "name": "name",
+    "sw": "sw_version",
+    "url": "support_url",
 }
